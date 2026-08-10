@@ -20548,12 +20548,41 @@ void ImGui::DockNodeTreeUpdateSplitter(ImGuiDockNode* node)
         bb.Max[axis ^ 1] += child_1->Size[axis ^ 1];
         //if (g.IO.KeyCtrl) GetForegroundDrawList(g.CurrentWindow->Viewport)->AddRect(bb.Min, bb.Max, IM_COL32(255,0,255,255));
 
+        // JOYSTICK PATCH (Joystick editor theme, plan step 29/65's UI work -
+        // first direct modification to this vendored copy; grep "JOYSTICK
+        // PATCH" to find every one if this file is ever updated from
+        // upstream): dock-node splitters - the drag bars BETWEEN docked
+        // panel groups, what a user actually grabs to resize a split -
+        // render through this function alone, but the colors ImGui uses
+        // for them (ImGuiCol_Separator/SeparatorHovered/SeparatorActive)
+        // are the EXACT SAME ones every plain ImGui::Separator() call
+        // inside a panel's own content uses too. Theming those three
+        // globally (tried first, in Joystick/src/Joystick/UI/EditorTheme.h)
+        // made every in-panel divider match the splitter color as a side
+        // effect - confirmed live, not just in theory - which is not what
+        // was asked for and reads worse, not better. There is no ImGui
+        // style slot meaning "dock splitter only", so the only correct fix
+        // is scoping the color override to just the two draw calls in this
+        // function, which is what the two blocks below do.
+        //
+        // Hex values MUST match Joystick::UI::Colors::Accent (0xF5793B)
+        // and ::AccentRed (0xBF1922), EditorTheme.h - duplicated here
+        // rather than shared because this vendored file cannot include an
+        // engine header. Update both places together if the brand palette
+        // changes.
+        const ImU32 joystickSplitterColor        = IM_COL32(0xF5, 0x79, 0x3B, 0xFF);
+        const ImU32 joystickSplitterColorHovered = IM_COL32(0xBF, 0x19, 0x22, 0xFF);
+
         const ImGuiDockNodeFlags merged_flags = child_0->MergedFlags | child_1->MergedFlags; // Merged flags for BOTH childs
         const ImGuiDockNodeFlags no_resize_axis_flag = (axis == ImGuiAxis_X) ? ImGuiDockNodeFlags_NoResizeX : ImGuiDockNodeFlags_NoResizeY;
         if ((merged_flags & ImGuiDockNodeFlags_NoResize) || (merged_flags & no_resize_axis_flag))
         {
+            // JOYSTICK PATCH: a locked (non-resizable) splitter still marks
+            // the boundary between two docked groups, so it gets the same
+            // resting colour as a draggable one rather than the original
+            // ImGuiCol_Separator (see the comment above this block).
             ImGuiWindow* window = g.CurrentWindow;
-            window->DrawList->AddRectFilled(bb.Min, bb.Max, GetColorU32(ImGuiCol_Separator), g.Style.FrameRounding);
+            window->DrawList->AddRectFilled(bb.Min, bb.Max, joystickSplitterColor, g.Style.FrameRounding);
         }
         else
         {
@@ -20599,7 +20628,19 @@ void ImGui::DockNodeTreeUpdateSplitter(ImGuiDockNode* node)
             float min_size_0 = resize_limits[0] - child_0->Pos[axis];
             float min_size_1 = child_1->Pos[axis] + child_1->Size[axis] - resize_limits[1];
             ImU32 bg_col = GetColorU32(ImGuiCol_WindowBg);
-            if (SplitterBehavior(bb, GetID("##Splitter"), axis, &cur_size_0, &cur_size_1, min_size_0, min_size_1, g.WindowsBorderHoverPadding, WINDOWS_RESIZE_FROM_EDGES_FEEDBACK_TIMER, bg_col))
+            // JOYSTICK PATCH: SplitterBehavior() (imgui_widgets.cpp) draws
+            // itself using ImGuiCol_Separator/SeparatorHovered/SeparatorActive
+            // internally - pushed here, scoped to JUST this one call, so the
+            // override never touches ordinary in-panel ImGui::Separator()
+            // calls or any other caller SplitterBehavior might have
+            // elsewhere. See the comment above this function's other
+            // splitter-color block for why this exists at all.
+            PushStyleColor(ImGuiCol_Separator, joystickSplitterColor);
+            PushStyleColor(ImGuiCol_SeparatorHovered, joystickSplitterColorHovered);
+            PushStyleColor(ImGuiCol_SeparatorActive, joystickSplitterColorHovered);
+            bool splitterHeld = SplitterBehavior(bb, GetID("##Splitter"), axis, &cur_size_0, &cur_size_1, min_size_0, min_size_1, g.WindowsBorderHoverPadding, WINDOWS_RESIZE_FROM_EDGES_FEEDBACK_TIMER, bg_col);
+            PopStyleColor(3);
+            if (splitterHeld)
             {
                 if (touching_nodes[0].Size > 0 && touching_nodes[1].Size > 0)
                 {
